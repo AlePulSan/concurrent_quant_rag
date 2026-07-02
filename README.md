@@ -21,4 +21,4 @@ ollama run llama3.1
 Place your technical `.pdf` files inside the `data/raw/` folder.
 
 4. Run the Pipeline:
-python PoC/test_real_pdf.py
+python PoC/test_real_pdf.py 
