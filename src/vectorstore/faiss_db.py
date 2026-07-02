@@ -9,7 +9,7 @@ class FAISSVectorStore:
     def __init__(self, dimension: int = 384):
         """
         Inicializa la base de datos vectorial en memoria
-        Usa IndexFlatL2 para búsqueda exacta por distancia euclidia
+        Usa IndexFlatL2 para búsqueda con distancia euclidia
         """
         self.dimension = dimension
         self.index = faiss.IndexFlatL2(dimension)
@@ -24,7 +24,7 @@ class FAISSVectorStore:
         if len(embeddings) != len(chunk_ids):
             raise ValueError("El número de vectores no coincide con el número de IDs.")
         
-        # FAISS exige una matriz contigua en C y tipo float32
+        # FAISS proporciona una matriz contigua en C y tipo float32
         vectores_float32 = np.array(embeddings).astype('float32')
         
         # Guardamos en qué índice numérico empieza a insertar FAISS
@@ -53,7 +53,7 @@ class FAISSVectorStore:
         if len(q_vec.shape) == 1:
             q_vec = q_vec.reshape(1, -1)
 
-        # La búsqueda cruda en C++
+        # La búsqueda (c++)
         distancias, indices = self.index.search(q_vec, k)
         
         resultados = []
