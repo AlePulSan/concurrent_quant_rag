@@ -24,13 +24,13 @@ class FAISSVectorStore:
         if len(embeddings) != len(chunk_ids):
             raise ValueError("El número de vectores no coincide con el número de IDs.")
         
-        # FAISS proporciona una matriz contigua en C y tipo float32
+        # faiis proporciona una matriz contigua
         vectores_float32 = np.array(embeddings).astype('float32')
         
         # Guardamos en qué índice numérico empieza a insertar FAISS
         start_idx = self.index.ntotal
         
-        # Inserción en RAM
+        # Inserción en memortia
         self.index.add(vectores_float32)
         
         # Actualizamos nuestro mapa para no perder la referencia del texto
@@ -42,13 +42,13 @@ class FAISSVectorStore:
     def search(self, query_vector: np.ndarray, k: int = 3) -> List[Tuple[str, float]]:
         """
         Busca los k vectores más cercanos a la pregunta.
-        Retorna una lista de tuplas: (ID_del_chunk, distancia_matemática)
+        Retorna una lista de tuplas(ID_del_chunk, distancia_matemática)
         """
         if self.index.ntotal == 0:
             logger.warning("Intento de búsqueda en un índice FAISS vacío.")
             return []
 
-        # Aseguramos que la pregunta también sea float32 y tenga forma bidimensional (1, dimension)
+        # Aseguramos que la pregunta también sea float32 y tenga dos dimensiones (1, dimension)
         q_vec = np.array(query_vector).astype('float32')
         if len(q_vec.shape) == 1:
             q_vec = q_vec.reshape(1, -1)
@@ -58,7 +58,7 @@ class FAISSVectorStore:
         
         resultados = []
         for dist, idx in zip(distancias[0], indices[0]):
-            # FAISS devuelve -1 si no encuentra suficientes vecinos
+            # faiss devuelve -1 si no encuentra suficientes vecinos
             if idx != -1 and idx in self.doc_map:
                 chunk_id = self.doc_map[idx]
                 resultados.append((chunk_id, float(dist)))

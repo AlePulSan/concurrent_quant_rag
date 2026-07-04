@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class AsyncDocumentReader:
     def __init__(self, base_dir: str = "data/raw"):
-        # Usa el diccionario que pasemos como almacenamiento. Si no, usa uno vacío.
+        # Usa el diccionario que pasemos como almacenamiento. Si no se usa uno vacío.
         self.base_dir = pathlib.Path(base_dir)
 
     def _read_pdf_sync(self, file_path: pathlib.Path) -> str:

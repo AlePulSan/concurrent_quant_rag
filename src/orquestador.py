@@ -3,26 +3,25 @@ from sentence_transformers import SentenceTransformer
 from src.processing.workers import _naive_chunking
 from src.vectorstore.faiss_db import FAISSVectorStore 
 from src.ingestion.async_reader import AsyncDocumentReader
+from src.config import RAGConfig 
 import aiohttp
+import pymupdf4llm
+import os
 
 logger = logging.getLogger(__name__)
 
 class OrquestadorRAG:
     def __init__(self):
-        # Se cargamos el modelo
-        self.modelo = SentenceTransformer("all-MiniLM-L6-v2")
-        # Inicializamos la base de datos vectorial en memoria
-        self.db = FAISSVectorStore(dimension=384)
+        self.modelo = SentenceTransformer(RAGConfig.EMBEDDING_MODEL_NAME)
+        self.db = FAISSVectorStore(dimension=RAGConfig.VECTOR_DIMENSION)
         self.lector = AsyncDocumentReader()
         self.memoria_textos = {}
         
     async def ingerir_lote_documentos(self, doc_ids: list[str]):
-        """Flujo completo: Cortar -> Vectorizar -> Guardar en FAISS"""
-        print(f"\nProcesando Documento: {doc_ids}")
-        # Concurrencia
+        """Flujo (Cortar -> Vectorizar -> Guardar en FAISS)"""
+        print(f"\nProcesando: {doc_ids}")
         documentos_crudos = await self.lector.read_batch(doc_ids)
         
-        # procesado
         for doc in documentos_crudos:
             doc_id = doc["id"]
             texto = doc["texto"]
@@ -30,32 +29,30 @@ class OrquestadorRAG:
             if not texto:
                 continue
                 
-            # Cortar
-            chunks = _naive_chunking(texto, chunk_size=150, overlap=30)
+            # Chunking (cortar)
+            chunks = _naive_chunking(texto, chunk_size=RAGConfig.CHUNK_SIZE, overlap=RAGConfig.CHUNK_OVERLAP)
             if not chunks:
                 print("El documento está vacío.")
                 continue
             
             print(f"Texto fragmentado en {len(chunks)} partes")
-            
-            # Generamos IDs únicos para cada trozo
             chunk_ids = [f"{doc_id}_chunk_{i}" for i in range(len(chunks))]
             
-            # Vectorizamos
+            # Vectorizamos y Guardamos
             vectores = self.modelo.encode(chunks)
-            
-            # Guardamos
             self.db.add_vectors(vectores, chunk_ids)
-        print("Vectores inyectados en la base de datos con éxito.")
+            
+            # Se guarda en memoria para poder recuperar el texto después
+            for i, chunk_id in enumerate(chunk_ids):
+                self.memoria_textos[chunk_id] = chunks[i]
+                
+        print("Vectores inyectados en la base de datos")
         
-    def buscar_respuesta(self, pregunta: str, k: int = 2):
-        """Convierte la pregunta a vector, busca en FAISS y recupera el texto"""
+    def buscar_respuesta(self, pregunta: str, k: int = RAGConfig.RETRIEVAL_K):
+        """Convierte la pregunta a vector, busca en FAISS y recupera el texto relacionado"""
         print(f"\nBuscando en la base de datos: '{pregunta}'")
         
-        # Vectorizar la pregunta
         vector_pregunta = self.modelo.encode([pregunta])
-        
-        # Búsqueda
         resultados_faiss = self.db.search(vector_pregunta, k)
         
         contexto_recuperado = []
@@ -65,14 +62,29 @@ class OrquestadorRAG:
             
         return contexto_recuperado
 
-    async def generar_respuesta_llm(self, pregunta: str, modelo_ollama: str = "llama3.1"):
-        """Ensambla el contexto y ataca la API de Ollama (local)"""
-        # Recuperamos los mejores fragmentos
-        documentos = self.buscar_respuesta(pregunta, k=3)
+    async def generar_respuesta_llm(self, pregunta: str, historial_chat: list = None, modelo_ollama: str = RAGConfig.DEFAULT_LLM_MODEL):
+        """Ensambla el contexto, la memoria reciente y ataca la API local"""
+        # Recuperamos contexto matemático
+        documentos = self.buscar_respuesta(pregunta, k=RAGConfig.RETRIEVAL_K)
         bloque_contexto = "\n---\n".join([doc["texto"] for doc in documentos])
         
-        # Prompt para definir cvontexto
-        prompt_final = f"""You are a quantitative data engineer. Answer the question directly and objectively using ONLY the provided information. If the answer cannot be found in the text, state clearly that you do not have enough data.
+        # Implementamos memoria del chat
+        bloque_memoria = ""
+        if historial_chat:
+            mensajes_recientes = historial_chat[-(RAGConfig.MEMORY_WINDOW_SIZE * 2):] # <- Se multiplica por dos porque cada interacción conlleva una pregunta y una respuesta
+            for msg in mensajes_recientes:
+                rol = "USER" if msg["role"] == "user" else "ASSISTANT"
+                bloque_memoria += f"{rol}: {msg['content']}\n"
+        else:
+            bloque_memoria = "No previous conversation history."
+        
+        # Prompt
+        prompt_final = f"""You are a strict quantitative data engineer. Answer the question directly using ONLY the provided CONTEXT INFORMATION. 
+
+CRITICAL RULE: If the answer is not explicitly found in the CONTEXT INFORMATION, you must reply with exactly "DATA NOT FOUND IN CONTEXT" and nothing else. Do not use external knowledge. Do not apologize.
+
+PREVIOUS CONVERSATION HISTORY (Use to understand pronouns or follow-up questions):
+{bloque_memoria}
 
 CONTEXT INFORMATION:
 {bloque_contexto}
@@ -84,17 +96,16 @@ TECHNICAL ANSWER:"""
 
         print(f"Lanzando inferencia a Ollama (Modelo: {modelo_ollama})...")
         
-        url = "http://localhost:11434/api/generate"
         payload = {
             "model": modelo_ollama,
             "prompt": prompt_final,
             "stream": False,
-            "options": {"temperature": 0.0} 
+            "options": {"temperature": RAGConfig.LLM_TEMPERATURE} 
         }
         
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.post(url, json=payload) as response:
+                async with session.post(RAGConfig.OLLAMA_URL, json=payload) as response:
                     if response.status == 200:
                         data = await response.json()
                         return data.get("response", "")
@@ -102,3 +113,15 @@ TECHNICAL ANSWER:"""
                         return f"[ERROR API] Code {response.status}"
             except Exception as e:
                 return f"[ERROR] Ollama communication failed: {e}"
+
+    def extraer_texto_pdf(self, ruta_archivo):
+        """Extracción directa a Markdown para preservar tablas y fórmulas para el RAG."""
+        ruta_segura = os.path.abspath(ruta_archivo)
+        print(f"\nTransformando PDF a Markdown: {ruta_segura}")
+        
+        texto_markdown = pymupdf4llm.to_markdown(ruta_segura)
+        
+        if not texto_markdown:
+            raise ValueError("El documento devuelto está vacío")
+            
+        return texto_markdown

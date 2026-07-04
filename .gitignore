@@ -1,0 +1,31 @@
+# ========================= #
+# PYTHON & ENVIRONMENTS     #
+# ========================= #
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# ========================= #
+# DATA & VECTOR STORE       #
+# ========================= #
+# Ignorar los PDFs crudos y procesados para no engordar el repo
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Ignorar binarios de FAISS generados en tiempo de ejecución (por si acaso)
+*.faiss
+*.pkl
+
+# ========================= #
+# IDE & OS FILES            #
+# ========================= #
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

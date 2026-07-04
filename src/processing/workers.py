@@ -2,8 +2,7 @@ from typing import List
 
 def _naive_chunking(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """
-    Divide un texto en fragmentos (chunks) con solapamiento.
-    Uso de slicing nativo para eficiencia en memoria.
+    Divide un texto en fragmentos (chunks) añadiendo solapamiento.
     """
     if not text:
         return []
